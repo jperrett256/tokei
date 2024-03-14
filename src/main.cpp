@@ -1,10 +1,4 @@
-// Dear ImGui: standalone example application for DirectX 11
-
-// Learn about Dear ImGui:
-// - FAQ                  https://dearimgui.com/faq
-// - Getting Started      https://dearimgui.com/getting-started
-// - Documentation        https://dearimgui.com/docs (same as your local docs/ folder).
-// - Introduction, links and more at the top of imgui.cpp
+#define UNICODE
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
@@ -12,23 +6,25 @@
 #include <d3d11.h>
 #include <tchar.h>
 
-// Data
-static ID3D11Device*            g_pd3dDevice = nullptr;
-static ID3D11DeviceContext*     g_pd3dDeviceContext = nullptr;
-static IDXGISwapChain*          g_pSwapChain = nullptr;
-static UINT                     g_ResizeWidth = 0, g_ResizeHeight = 0;
-static ID3D11RenderTargetView*  g_mainRenderTargetView = nullptr;
+#define array_count(x) (sizeof(x) / sizeof(*(x)))
 
-// Forward declarations of helper functions
-bool CreateDeviceD3D(HWND hWnd);
-void CleanupDeviceD3D();
+struct DX11State
+{
+    ID3D11Device * device;
+    ID3D11DeviceContext * device_context;
+    IDXGISwapChain * swapchain;
+    UINT screen_width, screen_height;
+    ID3D11RenderTargetView * render_target_view;
+};
+
+static DX11State dx11_state;
+
 void CreateRenderTarget();
 void CleanupRenderTarget();
-LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+LRESULT WINAPI main_window_proc(HWND window, UINT message, WPARAM w_param, LPARAM l_param);
 
-// Main code
 #ifdef JDP_DEBUG_CONSOLE
-int main(int, char**)
+int main(void)
 {
     int show_code = SW_SHOWDEFAULT;
     HINSTANCE instance = GetModuleHandle(NULL);
@@ -40,25 +36,74 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
 {
     (void) prev_instance; (void) command_line;
 
-    // Create application window
     //ImGui_ImplWin32_EnableDpiAwareness();
-    WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, instance, nullptr, nullptr, nullptr, nullptr, L"ImGui Example", nullptr };
-    ::RegisterClassExW(&wc);
-    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Dear ImGui DirectX11 Example", WS_OVERLAPPEDWINDOW, 100, 100, 1280, 800, nullptr, nullptr, wc.hInstance, nullptr);
+    WNDCLASSW window_class = {};
+    window_class.style = CS_CLASSDC;
+    window_class.lpfnWndProc = main_window_proc;
+    window_class.hInstance = instance;
+    window_class.hCursor = LoadCursor(NULL, IDC_ARROW);
+    window_class.lpszClassName = L"Tokei";
+    RegisterClass(&window_class);
+    HWND window = CreateWindowExW(
+        0, window_class.lpszClassName, L"時計", WS_OVERLAPPEDWINDOW,
+        100, 100, 1280, 800,
+        NULL, NULL, window_class.hInstance, NULL
+    );
 
-    // Initialize Direct3D
-    if (!CreateDeviceD3D(hwnd))
     {
-        CleanupDeviceD3D();
-        ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
-        return 1;
+        DXGI_SWAP_CHAIN_DESC swapchain_desc = {};
+        swapchain_desc.BufferCount = 2;
+        swapchain_desc.BufferDesc.Width = 0;
+        swapchain_desc.BufferDesc.Height = 0;
+        swapchain_desc.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        swapchain_desc.BufferDesc.RefreshRate.Numerator = 60; // TODO what's this?
+        swapchain_desc.BufferDesc.RefreshRate.Denominator = 1;
+        swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
+        swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        swapchain_desc.OutputWindow = window;
+        swapchain_desc.SampleDesc.Count = 1;
+        swapchain_desc.SampleDesc.Quality = 0;
+        swapchain_desc.Windowed = TRUE;
+        swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD; // TODO given we're targeting Windows 11 we could use the newer flip model swapchain type
+
+        UINT create_device_flags = 0;
+#ifdef JDP_DEBUG_DX11
+        create_device_flags |= D3D11_CREATE_DEVICE_DEBUG;
+#endif
+        D3D_FEATURE_LEVEL feature_level;
+        const D3D_FEATURE_LEVEL feature_levels[2] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0, };
+
+        HRESULT result;
+
+        result = D3D11CreateDeviceAndSwapChain(
+            NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, create_device_flags,
+            feature_levels, array_count(feature_levels), D3D11_SDK_VERSION, &swapchain_desc,
+            &dx11_state.swapchain, &dx11_state.device, &feature_level, &dx11_state.device_context
+        );
+
+        if (result == DXGI_ERROR_UNSUPPORTED)
+        {
+            // try high-performance WARP software driver if hardware is not available
+            result = D3D11CreateDeviceAndSwapChain(
+                NULL, D3D_DRIVER_TYPE_WARP, NULL, create_device_flags,
+                feature_levels, array_count(feature_levels), D3D11_SDK_VERSION, &swapchain_desc,
+                &dx11_state.swapchain, &dx11_state.device, &feature_level, &dx11_state.device_context
+            );
+        }
+
+        if (FAILED(result))
+        {
+            // TODO create message box displaying error
+            OutputDebugStringA("Failed to create D3D11 device.");
+            ExitProcess(1);
+        }
+
+        CreateRenderTarget();
     }
 
-    // Show the window
-    ::ShowWindow(hwnd, show_code);
-    ::UpdateWindow(hwnd);
+    ShowWindow(window, show_code);
+    UpdateWindow(window);
 
-    // Setup Dear ImGui context
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
@@ -74,7 +119,6 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
     //io.ConfigFlags |= ImGuiConfigFlags_DpiEnableScaleFonts;     // FIXME-DPI: Experimental. THIS CURRENTLY DOESN'T WORK AS EXPECTED. DON'T USE IN USER APP!
     //io.ConfigFlags |= ImGuiConfigFlags_DpiEnableScaleViewports; // FIXME-DPI: Experimental.
 
-    // Setup Dear ImGui style
     ImGui::StyleColorsDark();
     //ImGui::StyleColorsLight();
 
@@ -87,8 +131,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
     }
 
     // Setup Platform/Renderer backends
-    ImGui_ImplWin32_Init(hwnd);
-    ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
+    ImGui_ImplWin32_Init(window);
+    ImGui_ImplDX11_Init(dx11_state.device, dx11_state.device_context);
 
     // Load Fonts
     // - If no fonts are loaded, dear imgui will use the default font. You can also load multiple fonts and use ImGui::PushFont()/PopFont() to select them.
@@ -111,29 +155,27 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
     bool show_another_window = false;
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
-    // Main loop
     bool done = false;
     while (!done)
     {
-        // Poll and handle messages (inputs, window resize, etc.)
-        // See the WndProc() function below for our to dispatch events to the Win32 backend.
         MSG msg;
-        while (::PeekMessage(&msg, nullptr, 0U, 0U, PM_REMOVE))
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
         {
-            ::TranslateMessage(&msg);
-            ::DispatchMessage(&msg);
+            TranslateMessage(&msg);
+            DispatchMessage(&msg);
             if (msg.message == WM_QUIT)
                 done = true;
         }
-        if (done)
-            break;
+        if (done) break;
 
         // Handle window resize (we don't resize directly in the WM_SIZE handler)
-        if (g_ResizeWidth != 0 && g_ResizeHeight != 0)
+        if (dx11_state.screen_width != 0 && dx11_state.screen_height != 0)
         {
             CleanupRenderTarget();
-            g_pSwapChain->ResizeBuffers(0, g_ResizeWidth, g_ResizeHeight, DXGI_FORMAT_UNKNOWN, 0);
-            g_ResizeWidth = g_ResizeHeight = 0;
+
+            dx11_state.swapchain->ResizeBuffers(0, dx11_state.screen_width, dx11_state.screen_height, DXGI_FORMAT_UNKNOWN, 0);
+            dx11_state.screen_width = dx11_state.screen_height = 0;
+
             CreateRenderTarget();
         }
 
@@ -182,8 +224,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
         // Rendering
         ImGui::Render();
         const float clear_color_with_alpha[4] = { clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w };
-        g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
-        g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color_with_alpha);
+        dx11_state.device_context->OMSetRenderTargets(1, &dx11_state.render_target_view, NULL);
+        dx11_state.device_context->ClearRenderTargetView(dx11_state.render_target_view, clear_color_with_alpha);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
         // Update and Render additional Platform Windows
@@ -193,75 +235,55 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
             ImGui::RenderPlatformWindowsDefault();
         }
 
-        g_pSwapChain->Present(1, 0); // Present with vsync
-        //g_pSwapChain->Present(0, 0); // Present without vsync
+        dx11_state.swapchain->Present(1, 0); // vsync enabled
     }
 
-    // Cleanup
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
 
-    CleanupDeviceD3D();
-    ::DestroyWindow(hwnd);
-    ::UnregisterClassW(wc.lpszClassName, wc.hInstance);
+    {
+        CleanupRenderTarget();
+        if (dx11_state.swapchain)
+        {
+            dx11_state.swapchain->Release();
+            dx11_state.swapchain = NULL;
+        }
+        if (dx11_state.device_context)
+        {
+            dx11_state.device_context->Release();
+            dx11_state.device_context = NULL;
+        }
+        if (dx11_state.device)
+        {
+            dx11_state.device->Release();
+            dx11_state.device = NULL;
+        }
+    }
+
+    // TODO this cleanup isn't really necessary
+
+    DestroyWindow(window);
+    UnregisterClass(window_class.lpszClassName, window_class.hInstance);
 
     return 0;
 }
 
-// Helper functions
-bool CreateDeviceD3D(HWND hWnd)
-{
-    // Setup swap chain
-    DXGI_SWAP_CHAIN_DESC sd;
-    ZeroMemory(&sd, sizeof(sd));
-    sd.BufferCount = 2;
-    sd.BufferDesc.Width = 0;
-    sd.BufferDesc.Height = 0;
-    sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    sd.BufferDesc.RefreshRate.Numerator = 60;
-    sd.BufferDesc.RefreshRate.Denominator = 1;
-    sd.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_MODE_SWITCH;
-    sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-    sd.OutputWindow = hWnd;
-    sd.SampleDesc.Count = 1;
-    sd.SampleDesc.Quality = 0;
-    sd.Windowed = TRUE;
-    sd.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
-
-    UINT createDeviceFlags = 0;
-    //createDeviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
-    D3D_FEATURE_LEVEL featureLevel;
-    const D3D_FEATURE_LEVEL featureLevelArray[2] = { D3D_FEATURE_LEVEL_11_0, D3D_FEATURE_LEVEL_10_0, };
-    HRESULT res = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext);
-    if (res == DXGI_ERROR_UNSUPPORTED) // Try high-performance WARP software driver if hardware is not available.
-        res = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext);
-    if (res != S_OK)
-        return false;
-
-    CreateRenderTarget();
-    return true;
-}
-
-void CleanupDeviceD3D()
-{
-    CleanupRenderTarget();
-    if (g_pSwapChain) { g_pSwapChain->Release(); g_pSwapChain = nullptr; }
-    if (g_pd3dDeviceContext) { g_pd3dDeviceContext->Release(); g_pd3dDeviceContext = nullptr; }
-    if (g_pd3dDevice) { g_pd3dDevice->Release(); g_pd3dDevice = nullptr; }
-}
-
 void CreateRenderTarget()
 {
-    ID3D11Texture2D* pBackBuffer;
-    g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
-    g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
-    pBackBuffer->Release();
+    ID3D11Texture2D * backbuffer;
+    dx11_state.swapchain->GetBuffer(0, IID_PPV_ARGS(&backbuffer));
+    dx11_state.device->CreateRenderTargetView(backbuffer, NULL, &dx11_state.render_target_view);
+    backbuffer->Release();
 }
 
 void CleanupRenderTarget()
 {
-    if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = nullptr; }
+    if (dx11_state.render_target_view)
+    {
+        dx11_state.render_target_view->Release();
+        dx11_state.render_target_view = NULL;
+    }
 }
 
 #ifndef WM_DPICHANGED
@@ -276,35 +298,38 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 // - When io.WantCaptureMouse is true, do not dispatch mouse input data to your main application, or clear/overwrite your copy of the mouse data.
 // - When io.WantCaptureKeyboard is true, do not dispatch keyboard input data to your main application, or clear/overwrite your copy of the keyboard data.
 // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
-LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+LRESULT WINAPI main_window_proc(HWND window, UINT message, WPARAM w_param, LPARAM l_param)
 {
-    if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
+    if (ImGui_ImplWin32_WndProcHandler(window, message, w_param, l_param))
         return true;
 
-    switch (msg)
+    switch (message)
     {
     case WM_SIZE:
-        if (wParam == SIZE_MINIMIZED)
+        if (w_param == SIZE_MINIMIZED)
             return 0;
-        g_ResizeWidth = (UINT)LOWORD(lParam); // Queue resize
-        g_ResizeHeight = (UINT)HIWORD(lParam);
+        dx11_state.screen_width = (UINT) LOWORD(l_param); // Queue resize
+        dx11_state.screen_height = (UINT) HIWORD(l_param);
         return 0;
     case WM_SYSCOMMAND:
-        if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu
+        if ((w_param & 0xfff0) == SC_KEYMENU) // Disable ALT application menu
             return 0;
         break;
     case WM_DESTROY:
-        ::PostQuitMessage(0);
+        PostQuitMessage(0);
         return 0;
     case WM_DPICHANGED:
         if (ImGui::GetIO().ConfigFlags & ImGuiConfigFlags_DpiEnableScaleViewports)
         {
-            //const int dpi = HIWORD(wParam);
+            //const int dpi = HIWORD(w_param);
             //printf("WM_DPICHANGED to %d (%.0f%%)\n", dpi, (float)dpi / 96.0f * 100.0f);
-            const RECT* suggested_rect = (RECT*)lParam;
-            ::SetWindowPos(hWnd, nullptr, suggested_rect->left, suggested_rect->top, suggested_rect->right - suggested_rect->left, suggested_rect->bottom - suggested_rect->top, SWP_NOZORDER | SWP_NOACTIVATE);
+            const RECT * suggested_rect = (RECT *) l_param;
+            SetWindowPos(window, NULL,
+                suggested_rect->left, suggested_rect->top,
+                suggested_rect->right - suggested_rect->left, suggested_rect->bottom - suggested_rect->top,
+                SWP_NOZORDER | SWP_NOACTIVATE);
         }
         break;
     }
-    return ::DefWindowProcW(hWnd, msg, wParam, lParam);
+    return DefWindowProcW(window, message, w_param, l_param);
 }
