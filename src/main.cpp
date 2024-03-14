@@ -4,7 +4,7 @@
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
 #include <d3d11.h>
-#include <tchar.h>
+#include <assert.h>
 
 #define array_count(x) (sizeof(x) / sizeof(*(x)))
 
@@ -244,36 +244,26 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
 
     {
         CleanupRenderTarget();
-        if (dx11_state.swapchain)
-        {
-            dx11_state.swapchain->Release();
-            dx11_state.swapchain = NULL;
-        }
-        if (dx11_state.device_context)
-        {
-            dx11_state.device_context->Release();
-            dx11_state.device_context = NULL;
-        }
-        if (dx11_state.device)
-        {
-            dx11_state.device->Release();
-            dx11_state.device = NULL;
-        }
+        assert(dx11_state.swapchain);
+        dx11_state.swapchain->Release();
+        assert(dx11_state.device_context);
+        dx11_state.device_context->Release();
+        assert(dx11_state.device);
+        dx11_state.device->Release();
     }
-
-    // TODO this cleanup isn't really necessary
-
-    DestroyWindow(window);
-    UnregisterClass(window_class.lpszClassName, window_class.hInstance);
 
     return 0;
 }
 
 void CreateRenderTarget()
 {
+    HRESULT result;
+
     ID3D11Texture2D * backbuffer;
-    dx11_state.swapchain->GetBuffer(0, IID_PPV_ARGS(&backbuffer));
-    dx11_state.device->CreateRenderTargetView(backbuffer, NULL, &dx11_state.render_target_view);
+    result = dx11_state.swapchain->GetBuffer(0, IID_PPV_ARGS(&backbuffer));
+    assert(SUCCEEDED(result));
+    result = dx11_state.device->CreateRenderTargetView(backbuffer, NULL, &dx11_state.render_target_view);
+    assert(SUCCEEDED(result));
     backbuffer->Release();
 }
 
