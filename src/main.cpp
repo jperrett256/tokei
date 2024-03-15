@@ -44,9 +44,28 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
     window_class.hCursor = LoadCursor(NULL, IDC_ARROW);
     window_class.lpszClassName = L"Tokei";
     RegisterClass(&window_class);
+
+#ifdef JDP_COMPILER_CLANG
+    const wchar_t * app_name_wstr = L"時計";
+#else
+    // NOTE cl is not smart enough to accept the Unicode CJK string above, but clang is
+    const wchar_t * app_name_wstr;
+    {
+        const char * str = "時計";
+        static wchar_t buffer[16];
+
+        int chars_required = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
+        assert(chars_required <= array_count(buffer));
+        int chars_written = MultiByteToWideChar(CP_UTF8, 0, str, -1, buffer, array_count(buffer));
+        assert(chars_written == chars_required);
+
+        app_name_wstr = buffer;
+    }
+#endif
+
     HWND window = CreateWindowExW(
-        0, window_class.lpszClassName, L"時計", WS_OVERLAPPEDWINDOW,
-        100, 100, 1280, 800,
+        0, window_class.lpszClassName, app_name_wstr, WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 350, 100,
         NULL, NULL, window_class.hInstance, NULL
     );
 
@@ -150,10 +169,10 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
     //ImFont* font = io.Fonts->AddFontFromFileTTF("c:\\Windows\\Fonts\\ArialUni.ttf", 18.0f, nullptr, io.Fonts->GetGlyphRangesJapanese());
     //IM_ASSERT(font != nullptr);
 
-    // Our state
-    bool show_demo_window = true;
-    bool show_another_window = false;
-    ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
+    bool show_settings = false;
+    bool show_demo_window = false;
+
+    // TODO configure imgui.ini save location?
 
     bool done = false;
     while (!done)
@@ -183,47 +202,67 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
+        // ImGui::DockSpaceOverViewport(NULL, ImGuiDockNodeFlags_PassthruCentralNode, NULL);
 
-        // 1. Show the big demo window (Most of the sample code is in ImGui::ShowDemoWindow()! You can browse its code to learn more about Dear ImGui!).
+        {
+            ImGuiViewport * viewport = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(viewport->Pos);
+            ImGui::SetNextWindowSize(viewport->Size);
+
+            // TODO allow this window to show in front of other windows (viewports) if has focus
+
+            ImGui::Begin("Hello, world!", NULL,
+                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoDocking);
+
+            SYSTEMTIME system_time;
+            GetLocalTime(&system_time);
+
+            const char * weekday_names[] =
+            {
+                "Sunday",
+                "Monday",
+                "Tuesday",
+                "Wednesday",
+                "Thursday",
+                "Friday",
+                "Saturday"
+            };
+
+            assert(system_time.wDayOfWeek >= 0 && system_time.wDayOfWeek <= array_count(weekday_names));
+
+            ImGui::Text("%02d/%02d/%04d (%s)\t%02d:%02d:%02d.%04d",
+                system_time.wDay, system_time.wMonth, system_time.wYear,
+                weekday_names[system_time.wDayOfWeek],
+                system_time.wHour, system_time.wMinute, system_time.wSecond, system_time.wMilliseconds);
+
+            if (ImGui::Button("Settings"))
+                show_settings = true;
+
+            ImGui::End();
+        }
+
+        // TODO get ESC key to exit even when another viewport has focus
+
+        if (show_settings)
+        {
+            ImGui::Begin("Settings", &show_settings);
+
+            // TODO settings (e.g. date/time string formatting?)
+            // ImGui::SameLine();
+
+            ImGui::Text("Miscellaneous:");
+            ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
+            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", (double) (1000.0f / io.Framerate), (double) io.Framerate);
+
+            ImGui::End();
+        }
+
         if (show_demo_window)
             ImGui::ShowDemoWindow(&show_demo_window);
 
-        // 2. Show a simple window that we create ourselves. We use a Begin/End pair to create a named window.
-        {
-            static float f = 0.0f;
-            static int counter = 0;
-
-            ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-
-            ImGui::Text("This is some useful text.");               // Display some text (you can use a format strings too)
-            ImGui::Checkbox("Demo Window", &show_demo_window);      // Edit bools storing our window open/close state
-            ImGui::Checkbox("Another Window", &show_another_window);
-
-            ImGui::SliderFloat("float", &f, 0.0f, 1.0f);            // Edit 1 float using a slider from 0.0f to 1.0f
-            ImGui::ColorEdit3("clear color", (float*)&clear_color); // Edit 3 floats representing a color
-
-            if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
-                counter++;
-            ImGui::SameLine();
-            ImGui::Text("counter = %d", counter);
-
-            ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", (double) (1000.0f / io.Framerate), (double) io.Framerate);
-            ImGui::End();
-        }
-
-        // 3. Show another simple window.
-        if (show_another_window)
-        {
-            ImGui::Begin("Another Window", &show_another_window);   // Pass a pointer to our bool variable (the window will have a closing button that will clear the bool when clicked)
-            ImGui::Text("Hello from another window!");
-            if (ImGui::Button("Close Me"))
-                show_another_window = false;
-            ImGui::End();
-        }
-
-        // Rendering
         ImGui::Render();
-        const float clear_color_with_alpha[4] = { clear_color.x * clear_color.w, clear_color.y * clear_color.w, clear_color.z * clear_color.w, clear_color.w };
+        const float clear_color_with_alpha[4] = {};
         dx11_state.device_context->OMSetRenderTargets(1, &dx11_state.render_target_view, NULL);
         dx11_state.device_context->ClearRenderTargetView(dx11_state.render_target_view, clear_color_with_alpha);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -259,7 +298,8 @@ void CreateRenderTarget()
 {
     HRESULT result;
 
-    ID3D11Texture2D * backbuffer;
+    // NOTE setting to NULL to avoid triggering UBSAN issue in combaseapi.h (related to IID_PPV_ARGS)
+    ID3D11Texture2D * backbuffer = NULL;
     result = dx11_state.swapchain->GetBuffer(0, IID_PPV_ARGS(&backbuffer));
     assert(SUCCEEDED(result));
     result = dx11_state.device->CreateRenderTargetView(backbuffer, NULL, &dx11_state.render_target_view);
@@ -290,6 +330,12 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg
 // Generally you may always pass all inputs to dear imgui, and hide them from your application based on those two flags.
 LRESULT WINAPI main_window_proc(HWND window, UINT message, WPARAM w_param, LPARAM l_param)
 {
+    if (message == WM_KEYDOWN && w_param == VK_ESCAPE)
+    {
+        PostQuitMessage(0);
+        return 0;
+    }
+
     if (ImGui_ImplWin32_WndProcHandler(window, message, w_param, l_param))
         return true;
 
