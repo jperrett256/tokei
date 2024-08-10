@@ -4,7 +4,7 @@ INC_DIRS := inc
 
 SRC_FILES := src/main.cpp
 
-COMP_OPTS := /std:c++17 /EHsc
+COMP_OPTS := /std:c++17 /EHsc /utf-8
 # NOTE d3dcompiler.lib only needed if compiling shaders at runtime
 # NOTE dxgi.lib and dxguid.lib only needed for DXGI debug breakpoints
 LINK_OPTS = /link user32.lib d3d11.lib # d3dcompiler.lib dxgi.lib dxguid.lib # winmm.lib  gdi32.lib
@@ -14,7 +14,7 @@ COMP_OPTS_RELEASE := $(COMP_OPTS) /O2
 
 EXE_FILE := main.exe
 
-default: clang-debug
+default: msvc-debug
 
 
 IMGUI_BUILD_DIR := $(BUILD_MISC_DIR)

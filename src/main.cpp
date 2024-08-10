@@ -45,23 +45,7 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE prev_instance, LPSTR command_li
     window_class.lpszClassName = L"Tokei";
     RegisterClass(&window_class);
 
-#ifdef JDP_COMPILER_CLANG
     const wchar_t * app_name_wstr = L"時計";
-#else
-    // NOTE cl is not smart enough to accept the Unicode CJK string above, but clang is
-    const wchar_t * app_name_wstr;
-    {
-        const char * str = "時計";
-        static wchar_t buffer[16];
-
-        int chars_required = MultiByteToWideChar(CP_UTF8, 0, str, -1, NULL, 0);
-        assert(chars_required <= array_count(buffer));
-        int chars_written = MultiByteToWideChar(CP_UTF8, 0, str, -1, buffer, array_count(buffer));
-        assert(chars_written == chars_required);
-
-        app_name_wstr = buffer;
-    }
-#endif
 
     HWND window = CreateWindowExW(
         0, window_class.lpszClassName, app_name_wstr, WS_OVERLAPPEDWINDOW,
